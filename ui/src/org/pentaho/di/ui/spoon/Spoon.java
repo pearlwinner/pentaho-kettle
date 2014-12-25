@@ -36,6 +36,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Hashtable;
@@ -54,7 +55,6 @@ import java.util.regex.Pattern;
 import javax.swing.UIManager;
 import javax.swing.plaf.metal.MetalLookAndFeel;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.vfs.FileObject;
 import org.eclipse.jface.action.Action;
 import org.eclipse.jface.action.MenuManager;
@@ -122,6 +122,7 @@ import org.eclipse.swt.widgets.ToolItem;
 import org.eclipse.swt.widgets.Tree;
 import org.eclipse.swt.widgets.TreeItem;
 import org.pentaho.di.base.AbstractMeta;
+import org.pentaho.di.base.HasNamedConfigurationsInterface;
 import org.pentaho.di.cluster.ClusterSchema;
 import org.pentaho.di.cluster.SlaveServer;
 import org.pentaho.di.core.AddUndoPositionInterface;
@@ -167,6 +168,7 @@ import org.pentaho.di.core.logging.LogLevel;
 import org.pentaho.di.core.logging.LoggingObjectInterface;
 import org.pentaho.di.core.logging.LoggingObjectType;
 import org.pentaho.di.core.logging.SimpleLoggingObject;
+import org.pentaho.di.core.namedconfig.model.NamedConfiguration;
 import org.pentaho.di.core.parameters.NamedParams;
 import org.pentaho.di.core.plugins.JobEntryPluginType;
 import org.pentaho.di.core.plugins.LifecyclePluginType;
@@ -335,6 +337,8 @@ import org.pentaho.xul.swt.tab.TabSet;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 
+import com.google.common.annotations.VisibleForTesting;
+
 /**
  * This class handles the main window of the Spoon graphical transformation editor.
  *
@@ -383,6 +387,8 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
 
   public static final String STRING_JOB = BaseMessages.getString( PKG, "Spoon.STRING_JOB" );
 
+  public static final String STRING_NAMED_CONFIGS = BaseMessages.getString( PKG, "Spoon.STRING_NAMED_CONFIGS" );
+  
   private static final String SYNC_TRANS = "sync_trans_name_to_file_name";
 
   public static final String APP_NAME = BaseMessages.getString( PKG, "Spoon.Application.Name" );
@@ -1517,10 +1523,13 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
         "cluster-schema-class" ) );
       menuMap.put( "slave-cluster-class", mainSpoonContainer.getDocumentRoot().getElementById(
         "slave-cluster-class" ) );
+      menuMap.put( "named-configuration-class", mainSpoonContainer.getDocumentRoot().getElementById(
+          "named-configuration-class" ) );
       menuMap.put( "trans-inst", mainSpoonContainer.getDocumentRoot().getElementById( "trans-inst" ) );
       menuMap.put( "job-inst", mainSpoonContainer.getDocumentRoot().getElementById( "job-inst" ) );
       menuMap.put( "step-plugin", mainSpoonContainer.getDocumentRoot().getElementById( "step-plugin" ) );
       menuMap.put( "database-inst", mainSpoonContainer.getDocumentRoot().getElementById( "database-inst" ) );
+      menuMap.put( "named-conf-inst", mainSpoonContainer.getDocumentRoot().getElementById( "named-conf-inst" ) );
       menuMap.put( "step-inst", mainSpoonContainer.getDocumentRoot().getElementById( "step-inst" ) );
       menuMap.put( "job-entry-copy-inst", mainSpoonContainer.getDocumentRoot().getElementById(
         "job-entry-copy-inst" ) );
@@ -1531,6 +1540,8 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
         "cluster-schema-inst" ) );
       menuMap
         .put( "slave-server-inst", mainSpoonContainer.getDocumentRoot().getElementById( "slave-server-inst" ) );
+      menuMap.put( "named-configuration-inst", mainSpoonContainer.getDocumentRoot().getElementById(
+          "named-configuration-inst" ) );
     } catch ( Throwable t ) {
       new ErrorDialog(
         shell, BaseMessages.getString( PKG, "Spoon.Exception.ErrorReadingXULFile.Title" ), BaseMessages
@@ -2815,6 +2826,14 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
         shareObject( databaseMeta );
       }
     }
+    if ( "named-configuration-inst-share".equals( id ) ) {
+      final NamedConfiguration configuration = (NamedConfiguration) selectionObject;
+      if ( configuration.isShared() ) {
+        unShareObject( configuration );
+      } else {
+        shareObject( configuration );
+      }
+    }    
     if ( "step-inst-share".equals( id ) ) {
       final StepMeta stepMeta = (StepMeta) selectionObject;
       shareObject( stepMeta );
@@ -2950,6 +2969,8 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
         spoonMenu = (XulMenupopup) menuMap.get( "cluster-schema-class" );
       } else if ( selection.equals( SlaveServer.class ) ) {
         spoonMenu = (XulMenupopup) menuMap.get( "slave-cluster-class" );
+      } else if ( selection.equals( NamedConfiguration.class ) ) {
+        spoonMenu = (XulMenupopup) menuMap.get( "named-configuration-class" );
       } else {
         spoonMenu = null;
       }
@@ -2985,6 +3006,18 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
             item.setLabel( BaseMessages.getString( PKG, "Spoon.Menu.Popup.CONNECTIONS.UnShare" ) );
           } else {
             item.setLabel( BaseMessages.getString( PKG, "Spoon.Menu.Popup.CONNECTIONS.Share" ) );
+          }
+        }
+      } else if ( selection instanceof NamedConfiguration ) {
+        spoonMenu = (XulMenupopup) menuMap.get( "named-configuration-inst" );
+
+        XulMenuitem item = (XulMenuitem) mainSpoonContainer.getDocumentRoot().getElementById( "named-configuration-inst-share" );
+        if ( item != null ) {
+          final NamedConfiguration configuration = (NamedConfiguration) selection;
+          if ( configuration.isShared() ) {
+            item.setLabel( BaseMessages.getString( PKG, "Spoon.Menu.Popup.NAMEDCONFIGURATIONS.UnShare" ) );
+          } else {
+            item.setLabel( BaseMessages.getString( PKG, "Spoon.Menu.Popup.NAMEDCONFIGURATIONS.Share" ) );
           }
         }
       } else if ( selection instanceof StepMeta ) {
@@ -3753,6 +3786,7 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
       // first clear the list of databases and slave servers
       jobMeta.setDatabases( new ArrayList<DatabaseMeta>() );
       jobMeta.setSlaveServers( new ArrayList<SlaveServer>() );
+      jobMeta.setNamedConfigurations( new ArrayList<NamedConfiguration>() );
 
       // Read them from the new repository.
       try {
@@ -3835,6 +3869,7 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
       // first clear the list of databases, partition schemas, slave
       // servers, clusters
       transMeta.setDatabases( new ArrayList<DatabaseMeta>() );
+      transMeta.setNamedConfigurations( new ArrayList<NamedConfiguration>() );
       transMeta.setPartitionSchemas( new ArrayList<PartitionSchema>() );
       transMeta.setSlaveServers( new ArrayList<SlaveServer>() );
       transMeta.setClusterSchemas( new ArrayList<ClusterSchema>() );
@@ -6185,6 +6220,8 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
             refreshSlavesSubtree( tiTransName, transMeta, guiResource );
 
             refreshClustersSubtree( tiTransName, transMeta, guiResource );
+            
+            refreshNamedConfigurationsSubtree( tiTransName, transMeta, guiResource );
 
           }
         }
@@ -6232,6 +6269,8 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
 
             refreshJobEntriesSubtree( tiJobName, jobMeta, guiResource );
 
+            refreshNamedConfigurationsSubtree( tiJobName, jobMeta, guiResource );
+            
             refreshSlavesSubtree( tiJobName, jobMeta, guiResource );
 
           }
@@ -6410,8 +6449,77 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
   private List<SlaveServer> pickupSlaveServers( AbstractMeta transMeta ) throws KettleException {
     return ( rep == null ) ? transMeta.getSlaveServers() : rep.getSlaveServers();
   }
+  
+  private String[] pickupNamedConfigurations( AbstractMeta transMeta ) throws KettleException {
+    return ( rep == null ) ? transMeta.getNamedConfigurationNames() : rep.getNamedConfigurationNames( false );
+  }  
 
+  private NamedConfiguration findNamedConfiguration( List<? extends NamedConfiguration> cfgs, String name ) {
+    for ( NamedConfiguration nc : cfgs ) {
+      if ( nc.getName().equalsIgnoreCase( name ) ) {
+        return nc;
+      }
+    }
+    return null;
+  }  
+  
+  @VisibleForTesting void refreshNamedConfigurationsSubtree( TreeItem tiRootName, AbstractMeta meta, GUIResource guiResource ) {
+    TreeItem tiDbTitle = createTreeItem( tiRootName, STRING_NAMED_CONFIGS, guiResource.getImageBol() );
 
+    String[] namedConfigNames;
+    List<NamedConfiguration> namedConfigs;
+    try {
+      namedConfigNames = pickupNamedConfigurations( meta );
+
+      if ( namedConfigNames.length == 0 ) {
+        return;
+      }
+
+      if ( rep == null ) {
+        namedConfigs = meta.getNamedConfigurations();
+      } else {
+        namedConfigs = rep.readNamedConfigurations();
+        for ( int i = 0; i < namedConfigNames.length; i++ ) {
+          String namedConfigName = namedConfigNames[ i ];
+          namedConfigs.get( i ).setName( namedConfigName );
+        }
+      }
+    } catch ( KettleException e ) {
+      new ErrorDialog( shell,
+        BaseMessages.getString( PKG, "Spoon.ErrorDialog.Title" ),
+        BaseMessages.getString( PKG, "Spoon.ErrorDialog.ErrorFetchingFromRepo.NamedConfiguration" ),
+        e
+      );
+
+      return;
+    }
+
+    Arrays.sort( namedConfigNames, String.CASE_INSENSITIVE_ORDER );
+
+    for ( String namedConfigName : namedConfigNames ) {
+      if ( !filterMatch( namedConfigName ) ) {
+        continue;
+      }
+
+      NamedConfiguration namedConfiguration = findNamedConfiguration( namedConfigs, namedConfigName );
+
+      TreeItem tiDb = createTreeItem( tiDbTitle, namedConfiguration.getName(), guiResource.getImageConnection() );
+      if ( namedConfiguration.isShared() ) {
+        tiDb.setFont( guiResource.getFontBold() );
+      }
+    }
+  }  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   @VisibleForTesting void refreshSlavesSubtree( TreeItem tiRootName, AbstractMeta meta, GUIResource guiResource ) {
     TreeItem tiSlaveTitle = createTreeItem( tiRootName, STRING_SLAVES, guiResource.getImageBol() );
 
@@ -7560,6 +7668,18 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
     return getActiveJob();
   }
 
+  /**
+   * @return Either a TransMeta or JobMeta object
+   */
+  public HasNamedConfigurationsInterface getActiveHasNamedConfigurationsInterface() {
+    TransMeta transMeta = getActiveTransformation();
+    if ( transMeta != null ) {
+      return transMeta;
+    }
+    return getActiveJob();
+  }
+  
+  
   /**
    * Shows a wizard that creates a new database connection...
    *
@@ -8756,6 +8876,51 @@ public class Spoon extends ApplicationWindow implements AddUndoPositionInterface
     delegates.db.newConnection();
   }
 
+  public void newNamedConfiguration() {
+    HasNamedConfigurationsInterface hasNamedConfigurationsInterface = getActiveHasNamedConfigurationsInterface();
+    delegates.nc.newNamedConfiguration( hasNamedConfigurationsInterface, getShell());
+  }
+
+  public void editNamedConfiguration() {
+    HasNamedConfigurationsInterface hasNamedConfigurationsInterface = getActiveHasNamedConfigurationsInterface();
+    NamedConfiguration configuration = ( NamedConfiguration ) selectionObject;
+    delegates.nc.editNamedConfiguration( hasNamedConfigurationsInterface, configuration, getShell() );
+  }  
+  
+  public void delNamedConfiguration() {
+    if ( RepositorySecurityUI.verifyOperations( shell, rep, RepositoryOperation.DELETE_NAMED_CONFIGURATION ) ) {
+      return;
+    }
+
+    final NamedConfiguration configuration = (NamedConfiguration) selectionObject;
+    MessageBox mb = new MessageBox( shell, SWT.YES | SWT.NO | SWT.ICON_QUESTION );
+    mb.setMessage( BaseMessages.getString(
+      PKG, "Spoon.Dialog.DeleteNamedConfigurationAsk.Message", configuration.getName() ) );
+    mb.setText( BaseMessages.getString( PKG, "Spoon.Dialog.DeleteNamedConfigurationAsk.Title" ) );
+    int response = mb.open();
+
+    if ( response != SWT.YES ) {
+      return;
+    }
+
+    final HasNamedConfigurationsInterface hasNamedConfigurationsInterface = (HasNamedConfigurationsInterface) selectionObjectParent;
+    delegates.nc.delNamedConfiguration(hasNamedConfigurationsInterface, configuration);
+  }
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   public void getSQL() {
     delegates.db.getSQL();
   }
